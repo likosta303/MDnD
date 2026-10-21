@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>VTT — единый игровой стол</title>
+<style>
+:root{color-scheme:dark;--bg:#10131b;--panel:#191e2a;--line:#343c50;--text:#edf0f7;--muted:#a8b0c3;--accent:#9b83ff;--danger:#f16b76}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,sans-serif}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:#252c3d;color:var(--text)}button.primary{background:var(--accent);color:#171321;border-color:transparent;font-weight:700}button:disabled{opacity:.4;cursor:not-allowed}input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:9px;background:#0e1118;color:var(--text)}label{display:block;color:var(--muted);font-size:14px;margin:12px 0 5px}.shell{max-width:1000px;margin:auto;padding:18px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}.muted{color:var(--muted)}.hidden{display:none!important}.status{padding:10px 12px;background:#0e1118;border-radius:10px;color:var(--muted);white-space:pre-wrap}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.session{border:1px solid var(--line);border-radius:12px;padding:14px}.tabletop{height:calc(100dvh - 150px);min-height:360px;border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative;background-color:#202637;background-image:linear-gradient(#ffffff0d 1px,transparent 1px),linear-gradient(90deg,#ffffff0d 1px,transparent 1px);background-size:40px 40px;touch-action:pan-y}.token{position:absolute;width:54px;height:54px;border-radius:50%;border:3px solid #7de0a3;background:#314a48;display:grid;place-items:center;font-weight:800;user-select:none;touch-action:none;box-shadow:0 3px 12px #0008}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.toolbar button{padding:8px 11px}.topline{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}h1,h2,h3{line-height:1.2}h1{font-size:clamp(24px,5vw,36px)}.small{font-size:13px}.warning{color:#ffd28b}.dice-result{font-size:26px;font-weight:800;color:#d9ccff}
+</style>
+</head>
+<body><main class="shell">
+<header class="topline"><div><h1>VTT — единый игровой стол</h1><div class="muted">Гостевой вход · синхронизация сессии</div></div><button id="leaveBtn" class="hidden">Выйти из сессии</button></header>
+<section id="lobby">
+ <div class="panel"><h2>Войти без регистрации</h2>
+  <div class="row"><button id="playerRole" class="primary">Я игрок</button><button id="masterRole">Я мастер</button></div>
+  <label for="sessionName">Название сессии или код</label><input id="sessionName" autocomplete="off" placeholder="Например, Драконий перевал">
+  <label for="sessionPassword">Пароль сессии</label><input id="sessionPassword" type="password" autocomplete="current-password" placeholder="Пароль сессии">
+  <div id="characterWrap" class="hidden"><label for="characterName">Имя персонажа</label><input id="characterName" placeholder="Выбери/введи имя персонажа"></div>
+  <div class="row" style="margin-top:14px"><button id="joinBtn" class="primary">Войти</button><button id="createBtn">Создать сессию (мастер)</button></div>
+  <p class="muted small">Регистрация не нужна. Для защиты сессии пароль проверяется серверной функцией Supabase. Не помещайте секретные ключи в этот HTML.</p>
+ </div>
+ <div class="panel"><h2>Сессии</h2><div id="sessions" class="cards"><div class="muted">Список загружается после настройки подключения.</div></div></div>
+</section>
+<section id="game" class="hidden">
+ <div class="panel"><div class="topline"><div><h2 id="tableTitle">Игровой стол</h2><div id="roleInfo" class="muted"></div></div><div class="toolbar"><button id="addTokenBtn">＋ Токен</button><button id="d20Btn">🎲 d20</button><button id="clearDiceBtn">Очистить результат</button></div></div>
+  <div id="connectionStatus" class="status">Ожидание подключения…</div><div id="tabletop" class="tabletop" aria-label="Игровое поле"></div><p id="diceResult" class="dice-result"></p>
+ </div>
+ <div class="panel"><h3>События сессии</h3><div id="eventLog" class="status">События появятся здесь.</div></div>
+</section>
+<footer class="muted small">Прототип подключения: вставьте URL и публичные ключи в раздел CONFIG в коде. Секретные ключи сюда не добавлять.</footer>
+</main>
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
+import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
+import { getDatabase, ref, onValue, set, update, push, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
+
+/* CONFIG: заменить значениями своего проекта. Используйте только Supabase anon/publishable key. */
+const CONFIG = {
+  supabaseUrl: 'https://YOUR_PROJECT.supabase.co',
+  supabaseAnonKey: 'YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY',
+  firebase: {
+    apiKey: 'YOUR_FIREBASE_WEB_API_KEY',
+    authDomain: 'YOUR_PROJECT.firebaseapp.com',
+    databaseURL: 'https://YOUR_PROJECT-default-rtdb.europe-west1.firebasedatabase.app',
+    projectId: 'YOUR_FIREBASE_PROJECT_ID',
+    appId: 'YOUR_FIREBASE_APP_ID'
+  },
+  gatewayUrl: 'https://YOUR_PROJECT_REF.functions.supabase.co/session-gateway'
+};
+
+const $ = id => document.getElementById(id);
+const configured = !CONFIG.supabaseUrl.includes('YOUR_') && !CONFIG.supabaseAnonKey.includes('YOUR_') && !CONFIG.firebase.apiKey.includes('YOUR_');
+let role = 'player', activeSession = null, fbUid = null, db = null, supabase = null, stopState = null, stopEvents = null;
+let localState = {tokens:{}}, dragging = null;
+const guestIdKey = 'vtt_guest_id';
+let guestId = localStorage.getItem(guestIdKey);
+if (!guestId) { guestId = crypto.randomUUID(); localStorage.setItem(guestIdKey, guestId); }
+function status(s){$('connectionStatus').textContent=s}
+function log(s){$('eventLog').textContent = `${new Date().toLocaleTimeString()} — ${s}\n` + $('eventLog').textContent.slice(0,1200)}
+function setRole(next){role=next;$('playerRole').classList.toggle('primary',role==='player');$('masterRole').classList.toggle('primary',role==='master');$('characterWrap').classList.toggle('hidden',role!=='player');$('createBtn').disabled=role!=='master'}
+$('playerRole').onclick=()=>setRole('player');$('masterRole').onclick=()=>setRole('master');setRole('player');
+function callGateway(action,payload={}) {
+ if (!configured) throw new Error('Сначала заполните CONFIG в index.html.');
+ return fetch(CONFIG.gatewayUrl,{method:'POST',headers:{'Content-Type':'application/json','apikey':CONFIG.supabaseAnonKey,'Authorization':'Bearer '+CONFIG.supabaseAnonKey},body:JSON.stringify({action, ...payload, guestId})}).then(async r=>{let j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||`Ошибка сервера ${r.status}`);return j});
+}
+async function initRealtime(session) {
+ const app=initializeApp(CONFIG.firebase);
+ const auth=getAuth(app);
+ const credential=await signInAnonymously(auth); fbUid=credential.user.uid;
+ db=getDatabase(app);
+ const stateRef=ref(db,`sessions/${session.id}/table`);
+ if(stopState)stopState();
+ stopState=onValue(stateRef,snap=>{localState=snap.val()||{tokens:{}};renderTokens();status('Синхронизация активна · '+session.name);},err=>status('Ошибка синхронизации: '+err.message));
+ const evRef=ref(db,`sessions/${session.id}/events`);
+ if(stopEvents)stopEvents();
+ stopEvents=onValue(evRef,snap=>{const events=snap.val()||{};const latest=Object.values(events).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,12);$('eventLog').textContent=latest.map(e=>`${e.type||'Событие'}: ${e.text||''}`).join('\n')||'Событий пока нет.';});
+}
+function renderTokens(){
+ const field=$('tabletop');field.replaceChildren();
+ Object.entries(localState.tokens||{}).forEach(([id,t])=>{const el=document.createElement('div');el.className='token';el.textContent=t.label||'Т';el.style.left=`${Math.max(0,Math.min(92,t.x||5))}%`;el.style.top=`${Math.max(0,Math.min(85,t.y||5))}%`;el.title=t.label||'Токен';el.dataset.id=id;
+ if(role==='master'){el.addEventListener('pointerdown',e=>{dragging={id,startX:e.clientX,startY:e.clientY,x:t.x||5,y:t.y||5};el.setPointerCapture(e.pointerId)});el.addEventListener('pointermove',e=>{if(!dragging||dragging.id!==id)return;const r=field.getBoundingClientRect();el.style.left=`${Math.max(0,Math.min(92,dragging.x+(e.clientX-dragging.startX)/r.width*100))}%`;el.style.top=`${Math.max(0,Math.min(85,dragging.y+(e.clientY-dragging.startY)/r.height*100))}%`});el.addEventListener('pointerup',async e=>{if(!dragging||dragging.id!==id)return;const r=field.getBoundingClientRect();const next={...t,x:Math.max(0,Math.min(92,dragging.x+(e.clientX-dragging.startX)/r.width*100)),y:Math.max(0,Math.min(85,dragging.y+(e.clientY-dragging.startY)/r.height*100))};dragging=null;await update(ref(db,`sessions/${activeSession.id}/table/tokens/${id}`),next).catch(err=>status(err.message));});}
+ field.append(el)});
+}
+async function joinOrCreate(create=false){
+ try{
+  if(!configured)throw new Error('CONFIG не заполнен. Откройте README_SETUP_RU.txt и выполните шаги настройки.');
+  const name=$('sessionName').value.trim(), password=$('sessionPassword').value;
+  if(!create&&(!name||!password))throw new Error('Укажите название/код сессии и пароль.');
+  if(create&&(!name||password.length<6))throw new Error('Для создания укажите название и пароль не короче 6 символов.');
+  if(role==='player'&&!create&&!$('characterName').value.trim())throw new Error('Укажите имя персонажа.');
+  const result=await callGateway(create?'create':'join',{name,password,role,characterName:$('characterName').value.trim()});
+  activeSession=result.session;
+  $('lobby').classList.add('hidden');$('game').classList.remove('hidden');$('leaveBtn').classList.remove('hidden');
+  $('tableTitle').textContent=activeSession.name;$('roleInfo').textContent=`Роль: ${role==='master'?'Мастер':'Игрок'} · Сессия: ${activeSession.code||activeSession.id}`;
+  await initRealtime(activeSession);log('Подключение выполнено');
+ }catch(e){alert(e.message||String(e))}
+}
+$('joinBtn').onclick=()=>joinOrCreate(false);$('createBtn').onclick=()=>{setRole('master');joinOrCreate(true)};
+$('leaveBtn').onclick=()=>{if(stopState)stopState();if(stopEvents)stopEvents();activeSession=null;$('game').classList.add('hidden');$('lobby').classList.remove('hidden');$('leaveBtn').classList.add('hidden')};
+$('addTokenBtn').onclick=async()=>{if(!activeSession||role!=='master')return;const label=prompt('Имя токена','Новый токен');if(!label)return;const id=crypto.randomUUID();await set(ref(db,`sessions/${activeSession.id}/table/tokens/${id}`),{label,x:10+Math.random()*60,y:10+Math.random()*60,updatedAt:Date.now()});await push(ref(db,`sessions/${activeSession.id}/events`),{type:'token',text:`Добавлен токен: ${label}`,createdAt:Date.now()})};
+$('d20Btn').onclick=async()=>{if(!activeSession)return;const result=1+Math.floor(Math.random()*20);$('diceResult').textContent=`🎲 d20: ${result}`;await push(ref(db,`sessions/${activeSession.id}/events`),{type:'dice',text:`${role==='master'?'Мастер':'Игрок'} бросил d20: ${result}`,result,createdAt:Date.now()})};
+$('clearDiceBtn').onclick=()=>$('diceResult').textContent='';
+if(!configured){status('Не настроено: заполните CONFIG в index.html и выполните инструкции из README_SETUP_RU.txt.');}
+</script></body></html>
