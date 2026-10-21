@@ -87,7 +87,7 @@ async function joinOrCreate(create=false){
   if(!configured)throw new Error('CONFIG не заполнен. Откройте README_SETUP_RU.txt и выполните шаги настройки.');
   const name=$('sessionName').value.trim(), password=$('sessionPassword').value;
   if(!create&&(!name||!password))throw new Error('Укажите название/код сессии и пароль.');
-  if(create&&(!name||password.length<6))throw new Error('Для создания укажите название и пароль не короче 6 символов.');
+  if(create&&(!name||password.length<1))throw new Error('Для создания укажите название и пароль не короче 6 символов.');
   if(role==='player'&&!create&&!$('characterName').value.trim())throw new Error('Укажите имя персонажа.');
   const result=await callGateway(create?'create':'join',{name,password,role,characterName:$('characterName').value.trim()});
   activeSession=result.session;
